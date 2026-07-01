@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y xvfb x11vnc openbox libpulse0 libpulse-dev
+          sudo apt-get install -y xvfb x11vnc openbox libpulse0 libpulse-dev wget
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -28,7 +28,7 @@ jobs:
 
       - name: Start virtual display
         run: |
-          Xvfb :99 -screen 0 1080x1920x24 &
+          Xvfb :99 -screen 0 1080x2340x24 &
           sleep 2
           DISPLAY=:99 openbox &
           sleep 1
@@ -43,13 +43,16 @@ jobs:
         run: |
           cat > /tmp/run.sh << 'BASH'
           #!/bin/bash
+          echo "Android 13 booted with Google Play!"
           adb shell input keyevent 82
           sleep 2
           adb shell input keyevent 82
 
+          # Start VNC - captures the X display where emulator window is drawn
           x11vnc -display :99 -nopw -forever -shared -bg -rfbport 5900 -quiet -noncache
-          echo "VNC started"
+          echo "VNC started on port 5900"
 
+          # Bore tunnel
           /tmp/bore local 5900 --to bore.pub > /tmp/bore_out.txt 2>&1 &
           sleep 12
           PORT=$(grep -oP 'bore\.pub:\K\d+' /tmp/bore_out.txt | head -1)
@@ -57,10 +60,13 @@ jobs:
 
           echo ""
           echo "==============================="
-          echo "    ANDROID CLOUD IS READY!"
+          echo "   ANDROID 13 CLOUD READY!"
           echo "==============================="
-          echo "  VNC: bore.pub:$PORT"
-          echo "  Password: (none - press OK)"
+          echo "  VNC    : bore.pub:$PORT"
+          echo "  Pass   : (none - press OK)"
+          echo "  OS     : Android 13 (API 33)"
+          echo "  RAM    : 4GB"
+          echo "  Play   : Google Play Store"
           echo "==============================="
 
           while true; do
@@ -70,12 +76,16 @@ jobs:
           BASH
           chmod +x /tmp/run.sh
 
-      - name: Run Android Cloud
+      - name: Run Android 13 Cloud
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: 33
           arch: x86_64
-          profile: Nexus 6
+          target: google_apis_playstore
+          profile: pixel_6
           disable-animations: true
+          ram-size: 4096M
+          heap-size: 1024M
+          cores: 2
           emulator-options: -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: bash /tmp/run.sh
