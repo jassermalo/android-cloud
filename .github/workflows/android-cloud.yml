@@ -15,10 +15,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install tools (Xvfb + x11vnc + bore deps)
+      - name: Install VNC + display tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y xvfb x11vnc xdotool wget
+          sudo apt-get install -y xvfb x11vnc
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -26,84 +26,64 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android emulator + system image
-        run: |
-          sdkmanager --install "emulator" "platform-tools" "platforms;android-28" "system-images;android-28;google_apis;x86_64" --sdk_root=$ANDROID_SDK_ROOT
-          echo "y" | sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
-
-      - name: Create AVD
-        run: |
-          echo "no" | avdmanager create avd             --name "CloudPhone"             --package "system-images;android-28;google_apis;x86_64"             --device "pixel_3"             --force
-
       - name: Start virtual display
         run: |
           Xvfb :99 -screen 0 1080x1920x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
           sleep 2
-          echo "Virtual display started"
-
-      - name: Start Android Emulator
-        run: |
-          export DISPLAY=:99
-          export ANDROID_EMULATOR_USE_SYSTEM_LIBS=1
-          nohup $ANDROID_SDK_ROOT/emulator/emulator             -avd CloudPhone             -no-boot-anim             -no-audio             -gpu swiftshader_indirect             -no-snapshot             -skin 1080x1920             > /tmp/emulator.log 2>&1 &
-          echo "Emulator starting..."
-
-      - name: Wait for emulator to boot
-        run: |
-          echo "Waiting for boot..."
-          timeout 300 adb wait-for-device
-          for i in $(seq 1 60); do
-            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$BOOT" = "1" ]; then
-              echo "Emulator booted successfully!"
-              break
-            fi
-            echo "Waiting... ($i/60)"
-            sleep 5
-          done
-          adb shell input keyevent 82 2>/dev/null || true
-
-      - name: Start VNC Server
-        run: |
-          x11vnc -display :99 -nopw -forever -shared -bg -rfbport 5900 -quiet
-          echo "VNC server started on port 5900"
+          echo "Virtual display ready"
 
       - name: Download bore tunnel
         run: |
           wget -q https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz -O /tmp/bore.tar.gz
           tar xzf /tmp/bore.tar.gz -C /tmp/
           chmod +x /tmp/bore
+          echo "bore ready"
 
-      - name: Connect via bore.pub
-        run: |
-          /tmp/bore local 5900 --to bore.pub > /tmp/bore_out.txt 2>&1 &
-          sleep 8
-          PORT=$(grep -oP 'bore\.pub:\K\d+' /tmp/bore_out.txt | head -1)
-          if [ -z "$PORT" ]; then
-            PORT=$(grep -oP ':\K\d{4,5}' /tmp/bore_out.txt | head -1)
-          fi
+      - name: Run Android Cloud (Emulator + VNC + Tunnel)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86_64
+          profile: Nexus 6
+          disable-animations: true
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            echo "Emulator booted successfully!"
+            adb shell input keyevent 82
 
-          echo ""
-          echo "==============================="
-          echo "    ANDROID CLOUD IS READY!"
-          echo "==============================="
-          echo ""
-          echo "  VNC Address : bore.pub:$PORT"
-          echo "  Password    : (none)"
-          echo ""
-          echo "  Connect with any VNC client:"
-          echo "  - RealVNC Viewer (free)"
-          echo "  - TigerVNC"
-          echo "  - Android: bVNC app"
-          echo ""
-          echo "  Screen size : 1080x1920"
-          echo "  Android ver : 9 (API 28)"
-          echo "==============================="
+            # Start VNC server
+            x11vnc -display :99 -nopw -forever -shared -bg -rfbport 5900 -quiet
+            echo "VNC server started on port 5900"
 
-          while true; do
-            echo "[$(date '+%H:%M:%S')] Android Cloud Active - bore.pub:$PORT"
-            sleep 60
-          done
+            # Start bore tunnel
+            /tmp/bore local 5900 --to bore.pub > /tmp/bore_out.txt 2>&1 &
+            sleep 10
+
+            PORT=$(grep -oP 'bore\.pub:\K\d+' /tmp/bore_out.txt | head -1)
+            if [ -z "$PORT" ]; then
+              PORT=$(grep -oP ':\K\d{4,5}' /tmp/bore_out.txt | head -1)
+            fi
+
+            echo ""
+            echo "==============================="
+            echo "    ANDROID CLOUD IS READY!"
+            echo "==============================="
+            echo ""
+            echo "  VNC Address : bore.pub:$PORT"
+            echo "  Password    : (none - press OK)"
+            echo ""
+            echo "  VNC Clients (free):"
+            echo "  - RealVNC Viewer  (PC/Mac)"
+            echo "  - bVNC            (Android)"
+            echo ""
+            echo "  Android     : 9.0 (API 28)"
+            echo "  Screen      : 1080x1920"
+            echo "==============================="
+
+            while true; do
+              echo "[$(date '+%H:%M:%S')] Android Cloud Active - bore.pub:$PORT"
+              sleep 60
+            done
