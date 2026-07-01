@@ -15,8 +15,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install VNC + display tools
-        run: sudo apt-get update -q && sudo apt-get install -y xvfb x11vnc openbox
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y xvfb x11vnc openbox libpulse0 libpulse-dev
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -24,37 +26,33 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Start virtual display and window manager
+      - name: Start virtual display
         run: |
           Xvfb :99 -screen 0 1080x1920x24 &
           sleep 2
           DISPLAY=:99 openbox &
+          sleep 1
           echo "DISPLAY=:99" >> $GITHUB_ENV
-          echo "Virtual display ready"
 
       - name: Download bore
         run: |
           wget -q https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz -O /tmp/bore.tar.gz
-          tar xzf /tmp/bore.tar.gz -C /tmp/
-          chmod +x /tmp/bore
+          tar xzf /tmp/bore.tar.gz -C /tmp/ && chmod +x /tmp/bore
 
       - name: Prepare runner script
         run: |
           cat > /tmp/run.sh << 'BASH'
           #!/bin/bash
-          # Unlock screen
           adb shell input keyevent 82
           sleep 2
           adb shell input keyevent 82
 
-          # Start VNC - captures the full X display where emulator window is drawn
           x11vnc -display :99 -nopw -forever -shared -bg -rfbport 5900 -quiet -noncache
-          echo "VNC started on port 5900"
+          echo "VNC started"
 
-          # Bore tunnel
           /tmp/bore local 5900 --to bore.pub > /tmp/bore_out.txt 2>&1 &
           sleep 12
-          PORT=$(grep -oP 'bore.pub:Kd+' /tmp/bore_out.txt | head -1)
+          PORT=$(grep -oP 'bore\.pub:\K\d+' /tmp/bore_out.txt | head -1)
           [ -z "$PORT" ] && PORT=$(grep -oE ':[0-9]{4,5}' /tmp/bore_out.txt | tail -1 | tr -d ':')
 
           echo ""
